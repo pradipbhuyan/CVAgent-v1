@@ -1315,10 +1315,8 @@ def render_header():
 def render_sidebar_and_upload():
     with st.sidebar:
         st.write(f"Hi **{st.session_state['user']}**")
-
-        #st.markdown("### Model")
         st.markdown("---")
-        
+
         model_choice = st.selectbox(
             "Choose Model",
             ["gpt-4o-mini", "gpt-4o", "gpt-5"],
@@ -1342,80 +1340,118 @@ def render_sidebar_and_upload():
                     del st.session_state[key]
             st.rerun()
 
-    c1, c2 = st.columns([6, 1], gap="small")
-    with c1:
-        uploaded_files = st.file_uploader(
-            f"Upload document(s) - max {MAX_BATCH_FILES} files per batch",
-            type=["txt", "pdf", "docx", "pptx", "xlsx", "png", "jpg", "jpeg"],
-            accept_multiple_files=True,
-            key=f"main_file_uploader_{st.session_state.uploader_key}"
-        )
+    st.markdown("### Document Source")
 
-    with c2:
-        st.write("")
-        st.write("")
-        if st.button("Reset", use_container_width=True):
-            st.session_state.batch_results = []
-            st.session_state.exception_queue = []
-            st.session_state.batch_processed = False
-            st.session_state.last_batch_signature = None
-            st.session_state.show_reprocess_confirm = False
-            st.session_state.pending_batch_signature = None
-            st.session_state.batch_total_files = 0
-            st.session_state.batch_processed_files = 0
-            st.session_state.batch_current_file = None
-            st.session_state.batch_file_statuses = []
-            st.session_state.jd_rankings = []
-            st.session_state.jd_text = ""
-            st.session_state.uploader_key += 1
-            reset_run_state()
-            st.rerun()
+    source_mode = st.radio(
+        "Choose source",
+        ["Local Upload", "SharePoint / OneDrive"],
+        horizontal=True,
+        index=0 if st.session_state.get("source_mode", "Local Upload") == "Local Upload" else 1,
+    )
+    st.session_state["source_mode"] = source_mode
+
+    uploaded_files = []
+
+    if source_mode == "Local Upload":
+        c1, c2 = st.columns([6, 1], gap="small")
+
+        with c1:
+            uploaded_files = st.file_uploader(
+                f"Upload document(s) - max {MAX_BATCH_FILES} files per batch",
+                type=["txt", "pdf", "docx", "pptx", "xlsx", "png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key=f"main_file_uploader_{st.session_state.uploader_key}"
+            ) or []
+
+        with c2:
+            st.write("")
+            st.write("")
+            if st.button("Reset", use_container_width=True):
+                st.session_state.batch_results = []
+                st.session_state.exception_queue = []
+                st.session_state.active_batch_index = 0
+                st.session_state.batch_processed = False
+                st.session_state.last_batch_signature = None
+                st.session_state.show_reprocess_confirm = False
+                st.session_state.pending_batch_signature = None
+                st.session_state.batch_total_files = 0
+                st.session_state.batch_processed_files = 0
+                st.session_state.batch_current_file = None
+                st.session_state.batch_file_statuses = []
+                st.session_state.jd_rankings = []
+                st.session_state.jd_text = ""
+                st.session_state.remote_uploaded_files = []
+                st.session_state.uploader_key += 1
+                reset_run_state()
+                st.rerun()
+
+    else:
+        st.info("Load CVs directly from a SharePoint or OneDrive folder.")
+
+        s1, s2, s3 = st.columns(3)
+        with s1:
+            site_id = st.text_input("Site ID", key="sp_site_id")
+        with s2:
+            drive_id = st.text_input("Drive / Library ID", key="sp_drive_id")
+        with s3:
+            folder_path = st.text_input("Folder Path", value="CVs", key="sp_folder_path")
+
+        c1, c2 = st.columns([6, 1], gap="small")
+
+        with c1:
+            if st.button("Load CVs from SharePoint", use_container_width=True):
+                if not site_id or not drive_id or not folder_path:
+                    st.warning("Please enter Site ID, Drive ID, and Folder Path.")
+                else:
+                    try:
+                        with st.spinner("Loading files from SharePoint / OneDrive..."):
+                            fetched = get_cv_files_from_folder(site_id, drive_id, folder_path)
+                            remote_files = [
+                                RemoteUploadedFile(name=f["name"], content=f["content"])
+                                for f in fetched
+                            ]
+                            st.session_state["remote_uploaded_files"] = remote_files
+                            st.success(f"Loaded {len(remote_files)} file(s)")
+                    except Exception as e:
+                        st.error(f"Failed to load files: {str(e)}")
+
+            remote_files = st.session_state.get("remote_uploaded_files", [])
+            if remote_files:
+                st.caption(f"{len(remote_files)} file(s) ready from SharePoint / OneDrive")
+                preview_names = [f.name for f in remote_files[:10]]
+                st.write("Loaded files:")
+                for name in preview_names:
+                    st.caption(f"• {name}")
+
+        with c2:
+            st.write("")
+            st.write("")
+            if st.button("Reset", use_container_width=True, key="reset_remote_source"):
+                st.session_state.batch_results = []
+                st.session_state.exception_queue = []
+                st.session_state.active_batch_index = 0
+                st.session_state.batch_processed = False
+                st.session_state.last_batch_signature = None
+                st.session_state.show_reprocess_confirm = False
+                st.session_state.pending_batch_signature = None
+                st.session_state.batch_total_files = 0
+                st.session_state.batch_processed_files = 0
+                st.session_state.batch_current_file = None
+                st.session_state.batch_file_statuses = []
+                st.session_state.jd_rankings = []
+                st.session_state.jd_text = ""
+                st.session_state.remote_uploaded_files = []
+                reset_run_state()
+                st.rerun()
+
+        uploaded_files = st.session_state.get("remote_uploaded_files", [])
 
     if uploaded_files and len(uploaded_files) > MAX_BATCH_FILES:
         st.error(f"Batch limit exceeded. Maximum allowed is {MAX_BATCH_FILES} files.")
         uploaded_files = uploaded_files[:MAX_BATCH_FILES]
 
-    source_mode = st.radio(
-    "Document Source",
-    ["Local Upload", "SharePoint / OneDrive"],
-    horizontal=True
-    )
-
-    remote_files = []
-
-    if source_mode == "SharePoint / OneDrive":
-        site_id = st.text_input("Site ID")
-        drive_id = st.text_input("Drive ID / Document Library ID")
-        folder_path = st.text_input("Folder Path", value="CVs")
-    
-        if st.button("Load CVs from SharePoint", use_container_width=True):
-            try:
-                with st.spinner("Loading files from SharePoint / OneDrive..."):
-                    fetched = get_cv_files_from_folder(site_id, drive_id, folder_path)
-                    remote_files = [
-                        RemoteUploadedFile(name=f["name"], content=f["content"])
-                        for f in fetched
-                    ]
-                    st.session_state["remote_uploaded_files"] = remote_files
-                    st.success(f"Loaded {len(remote_files)} file(s)")
-            except Exception as e:
-                st.error(f"Failed to load files: {str(e)}")
-
-
-    uploaded_files = []
-    if source_mode == "Local Upload":
-        uploaded_files = st.file_uploader(
-            f"Upload document(s) - max {MAX_BATCH_FILES} files per batch",
-            type=["txt", "pdf", "docx", "pptx", "xlsx", "png", "jpg", "jpeg"],
-            accept_multiple_files=True,
-            key=f"main_file_uploader_{st.session_state.uploader_key}"
-        ) or []
-    else:
-        uploaded_files = st.session_state.get("remote_uploaded_files", [])
-    
     st.markdown("---")
     return uploaded_files
-
 
 def render_duplicate_warning():
     duplicate_info = st.session_state.get("duplicate_info") or {}
