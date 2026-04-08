@@ -51,6 +51,21 @@ from core import (
 
 from sharepoint_connector import get_cv_files_from_folder
 
+class RemoteUploadedFile:
+    def __init__(self, name: str, content: bytes):
+        self.name = name
+        self._content = content
+        self._pos = 0
+
+    def getvalue(self):
+        return self._content
+
+    def read(self):
+        return self._content
+
+    def seek(self, pos):
+        self._pos = pos
+
 # ------------------------------
 # PAGE CONFIG
 # ------------------------------
@@ -175,6 +190,8 @@ DEFAULT_KEYS = {
     "live_event_placeholder": None,
     "live_pipeline_placeholder": None,
     "uploader_key": 0,
+    "source_mode": "Local Upload",
+    "remote_uploaded_files": [],
     "template_library": [],
     "active_template_index": None,
     "version_history": [],
