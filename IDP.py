@@ -1344,14 +1344,20 @@ def render_sidebar_and_upload():
 
     st.markdown("### Document Source")
 
+    source_options = ["Local Upload", "SharePoint", "OneDrive"]
+    saved_source_mode = st.session_state.get("source_mode", "Local Upload")
+    
+    if saved_source_mode not in source_options:
+        saved_source_mode = "Local Upload"
+        st.session_state["source_mode"] = "Local Upload"
+    
     source_mode = st.radio(
         "Choose source",
-        ["Local Upload", "SharePoint", "OneDrive"],
+        source_options,
         horizontal=True,
-        index=["Local Upload", "SharePoint", "OneDrive"].index(
-            st.session_state.get("source_mode", "Local Upload")
-        ),
+        index=source_options.index(saved_source_mode),
     )
+    
     st.session_state["source_mode"] = source_mode
 
     uploaded_files = []
