@@ -49,6 +49,8 @@ from core import (
     build_consolidated_assessment_pdf,
 )
 
+from sharepoint_connector import get_cv_files_from_folder
+
 # ------------------------------
 # PAGE CONFIG
 # ------------------------------
@@ -1356,6 +1358,44 @@ def render_sidebar_and_upload():
         st.error(f"Batch limit exceeded. Maximum allowed is {MAX_BATCH_FILES} files.")
         uploaded_files = uploaded_files[:MAX_BATCH_FILES]
 
+    source_mode = st.radio(
+    "Document Source",
+    ["Local Upload", "SharePoint / OneDrive"],
+    horizontal=True
+    )
+
+    remote_files = []
+
+    if source_mode == "SharePoint / OneDrive":
+        site_id = st.text_input("Site ID")
+        drive_id = st.text_input("Drive ID / Document Library ID")
+        folder_path = st.text_input("Folder Path", value="CVs")
+    
+        if st.button("Load CVs from SharePoint", use_container_width=True):
+            try:
+                with st.spinner("Loading files from SharePoint / OneDrive..."):
+                    fetched = get_cv_files_from_folder(site_id, drive_id, folder_path)
+                    remote_files = [
+                        RemoteUploadedFile(name=f["name"], content=f["content"])
+                        for f in fetched
+                    ]
+                    st.session_state["remote_uploaded_files"] = remote_files
+                    st.success(f"Loaded {len(remote_files)} file(s)")
+            except Exception as e:
+                st.error(f"Failed to load files: {str(e)}")
+
+
+    uploaded_files = []
+    if source_mode == "Local Upload":
+        uploaded_files = st.file_uploader(
+            f"Upload document(s) - max {MAX_BATCH_FILES} files per batch",
+            type=["txt", "pdf", "docx", "pptx", "xlsx", "png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            key=f"main_file_uploader_{st.session_state.uploader_key}"
+        ) or []
+    else:
+        uploaded_files = st.session_state.get("remote_uploaded_files", [])
+    
     st.markdown("---")
     return uploaded_files
 
