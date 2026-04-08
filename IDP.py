@@ -1344,7 +1344,7 @@ def render_sidebar_and_upload():
 
     source_mode = st.radio(
         "Choose source",
-        ["Local Upload", "SharePoint / OneDrive"],
+        ["Local Upload", "SharePoint / OneDrive (CVs only)"],
         horizontal=True,
         index=0 if st.session_state.get("source_mode", "Local Upload") == "Local Upload" else 1,
     )
@@ -1357,8 +1357,8 @@ def render_sidebar_and_upload():
 
         with c1:
             uploaded_files = st.file_uploader(
-                f"Upload document(s) - max {MAX_BATCH_FILES} files per batch",
-                type=["txt", "pdf", "docx", "pptx", "xlsx", "png", "jpg", "jpeg"],
+                f"Upload resume document(s) - max {MAX_BATCH_FILES} files per batch",
+                type=["txt", "pdf", "docx"],
                 accept_multiple_files=True,
                 key=f"main_file_uploader_{st.session_state.uploader_key}"
             ) or []
@@ -1381,12 +1381,14 @@ def render_sidebar_and_upload():
                 st.session_state.jd_rankings = []
                 st.session_state.jd_text = ""
                 st.session_state.remote_uploaded_files = []
+                st.session_state.source_mode = "Local Upload"
                 st.session_state.uploader_key += 1
                 reset_run_state()
                 st.rerun()
 
     else:
-        st.info("Load CVs directly from a SharePoint or OneDrive folder.")
+        st.info("Load CVs only from a SharePoint or OneDrive folder. This source path is intended for resume processing.")
+        st.caption("Supported remote CV types: PDF, DOCX, TXT")
 
         s1, s2, s3 = st.columns(3)
         with s1:
@@ -1399,28 +1401,33 @@ def render_sidebar_and_upload():
         c1, c2 = st.columns([6, 1], gap="small")
 
         with c1:
-            if st.button("Load CVs from SharePoint", use_container_width=True):
+            if st.button("Load Resume CVs from SharePoint", use_container_width=True):
                 if not site_id or not drive_id or not folder_path:
                     st.warning("Please enter Site ID, Drive ID, and Folder Path.")
                 else:
                     try:
-                        with st.spinner("Loading files from SharePoint / OneDrive..."):
+                        with st.spinner("Loading CVs from SharePoint / OneDrive..."):
                             fetched = get_cv_files_from_folder(site_id, drive_id, folder_path)
-                            remote_files = [
-                                RemoteUploadedFile(name=f["name"], content=f["content"])
-                                for f in fetched
-                            ]
+                            remote_files = []
+
+                            for f in fetched:
+                                name = f["name"]
+                                suffix = Path(name).suffix.lower()
+                                if suffix in [".pdf", ".docx", ".txt"]:
+                                    remote_files.append(
+                                        RemoteUploadedFile(name=name, content=f["content"])
+                                    )
+
                             st.session_state["remote_uploaded_files"] = remote_files
-                            st.success(f"Loaded {len(remote_files)} file(s)")
+                            st.success(f"Loaded {len(remote_files)} CV file(s)")
                     except Exception as e:
                         st.error(f"Failed to load files: {str(e)}")
 
             remote_files = st.session_state.get("remote_uploaded_files", [])
             if remote_files:
-                st.caption(f"{len(remote_files)} file(s) ready from SharePoint / OneDrive")
-                preview_names = [f.name for f in remote_files[:10]]
+                st.caption(f"{len(remote_files)} CV file(s) ready from SharePoint / OneDrive")
                 st.write("Loaded files:")
-                for name in preview_names:
+                for name in [f.name for f in remote_files[:10]]:
                     st.caption(f"• {name}")
 
         with c2:
@@ -1441,6 +1448,7 @@ def render_sidebar_and_upload():
                 st.session_state.jd_rankings = []
                 st.session_state.jd_text = ""
                 st.session_state.remote_uploaded_files = []
+                st.session_state.source_mode = "Local Upload"
                 reset_run_state()
                 st.rerun()
 
@@ -1452,6 +1460,7 @@ def render_sidebar_and_upload():
 
     st.markdown("---")
     return uploaded_files
+
 
 def render_duplicate_warning():
     duplicate_info = st.session_state.get("duplicate_info") or {}
