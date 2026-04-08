@@ -1308,8 +1308,8 @@ def render_header():
             st.image(logo_path, width=130)
 
     with col_title:
-        st.markdown("## Intelligent Document Processor")
-        st.caption("AI-powered document understanding & automation")
+        st.markdown("## Intelligent Resume Processor")
+        st.caption("AI-powered resume evaluation & automation")
 
 
 def render_sidebar_and_upload():
