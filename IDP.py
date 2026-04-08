@@ -875,6 +875,38 @@ def process_single_file(uploaded_file):
     result = normalized.get("result", {})
     review_data = result.get("data") or normalized.get("structured_data") or {}
 
+    if doc_type != "resume":
+        record_agent_event("Classification Agent", "error", f"Document is not a CV/resume. Detected type: {doc_type or 'unknown'}")
+        return {
+            "file_name": uploaded_file.name,
+            "status": "Exception",
+            "doc_type": doc_type or "unknown",
+            "ocr_used": extracted["ocr_used"],
+            "exception_reason": f"Document is not a CV/resume. Detected type: {doc_type or 'unknown'}",
+            "review_data": review_data,
+            "validation": {"passed": False, "issues": [f"Expected a CV/resume but detected {doc_type or 'unknown'}"], "warnings": []},
+            "confidence": {},
+            "duplicate_info": {
+                "is_duplicate": False,
+                "match_file": None,
+                "reason": None,
+                "score": 0.0,
+            },
+            "auto_result": {
+                "doc_type": doc_type or "unknown",
+                "structured_data": normalized.get("structured_data"),
+                "result": result,
+                "metrics": {},
+                "step_metrics": normalized.get("step_metrics", []),
+                "ocr_used": extracted["ocr_used"],
+                "extraction_mode": extracted["extraction_mode"],
+            },
+            "vectorstore": vectorstore,
+            "full_text": full_text,
+            "cost": 0.0,
+            "tokens": 0,
+        }
+
     record_agent_event("Validation Agent", "running", "Checking required fields")
     validation = normalized.get("validation") or validate_document_data(review_data, doc_type)
     confidence = normalized.get("confidence") or build_confidence_map(review_data, doc_type)
@@ -1906,34 +1938,24 @@ def render_version_history():
 def render_batch_downloads():
     st.markdown("### Batch Downloads")
 
-    resume_count, invoice_count = get_batch_download_counts()
-    d1, d2 = st.columns(2)
+    resume_count, _ = get_batch_download_counts()
 
-    with d1:
-        if resume_count > 0:
-            resume_zip = build_zip_from_batch_results("resume")
-            st.download_button(
-                label=f"Download All Resumes ({resume_count})",
-                data=resume_zip,
-                file_name="all_resumes.zip",
-                mime="application/zip",
-                use_container_width=True
-            )
-        else:
-            st.button("Download All Resumes (0)", disabled=True, use_container_width=True, key="dl_all_resumes_disabled")
-
-    with d2:
-        if invoice_count > 0:
-            invoice_zip = build_zip_from_batch_results("invoice")
-            st.download_button(
-                label=f"Download All Invoice Excels ({invoice_count})",
-                data=invoice_zip,
-                file_name="all_invoice_excels.zip",
-                mime="application/zip",
-                use_container_width=True
-            )
-        else:
-            st.button("Download All Invoice Excels (0)", disabled=True, use_container_width=True, key="dl_all_invoices_disabled")
+    if resume_count > 0:
+        resume_zip = build_zip_from_batch_results("resume")
+        st.download_button(
+            label=f"Download All Resumes ({resume_count})",
+            data=resume_zip,
+            file_name="all_resumes.zip",
+            mime="application/zip",
+            use_container_width=True
+        )
+    else:
+        st.button(
+            "Download All Resumes (0)",
+            disabled=True,
+            use_container_width=True,
+            key="dl_all_resumes_disabled"
+        )
 
 
 def render_jd_ranking():
