@@ -1,6 +1,7 @@
 import requests
 import streamlit as st
 
+
 def get_graph_token():
     tenant_id = st.secrets["microsoft"]["tenant_id"]
     client_id = st.secrets["microsoft"]["client_id"]
