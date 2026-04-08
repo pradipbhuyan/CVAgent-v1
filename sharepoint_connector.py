@@ -5,6 +5,20 @@ from graph_auth import get_graph_headers
 
 ALLOWED_CV_TYPES = {".pdf", ".docx", ".txt"}
 
+class RemoteUploadedFile:
+    def __init__(self, name: str, content: bytes):
+        self.name = name
+        self._content = content
+        self._pos = 0
+
+    def getvalue(self):
+        return self._content
+
+    def read(self):
+        return self._content
+
+    def seek(self, pos):
+        self._pos = pos
 
 def list_drive_items(site_id: str, drive_id: str, folder_path: str):
     headers = get_graph_headers()
