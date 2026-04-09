@@ -105,7 +105,7 @@ def validate_api_key(api_key):
 
 
 def login():
-    logo_path = Path(__file__).parent / "IDP-Logo1.png"
+    logo_path = Path(__file__).parent / "ResumeProcessor.png"
     col1, col2, col3 = st.columns([1, 2, 1])
 
     with col2:
