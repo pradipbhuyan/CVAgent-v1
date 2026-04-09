@@ -110,7 +110,7 @@ def login():
 
     with col2:
         if logo_path.exists():
-            st.image(logo_path, width=220)
+            st.image(logo_path, width=250)
 
         st.markdown("### Sign In")
         username = st.text_input("Username")
@@ -1336,7 +1336,7 @@ def render_header():
 
     with col_logo:
         if logo_path.exists():
-            st.image(logo_path, width=130)
+            st.image(logo_path, width=250)
 
     with col_title:
         st.markdown("## Intelligent Resume Processor")
