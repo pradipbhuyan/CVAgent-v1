@@ -1331,7 +1331,7 @@ def regenerate_resume_from_review():
 # UI
 # ------------------------------
 def render_header():
-    logo_path = Path(__file__).parent / "IDP-Logo1.png"
+    logo_path = Path(__file__).parent / "ResumeProcessor.png"
     col_logo, col_title = st.columns([1, 6], gap="small")
 
     with col_logo:
