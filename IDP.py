@@ -874,39 +874,35 @@ def process_single_file(uploaded_file):
     doc_type = normalized.get("doc_type")
     result = normalized.get("result", {})
     review_data = result.get("data") or normalized.get("structured_data") or {}
-
+    
+    # 🚨 HARD FILTER: ONLY allow resumes
     if doc_type != "resume":
-        record_agent_event("Classification Agent", "error", f"Document is not a CV/resume. Detected type: {doc_type or 'unknown'}")
+        record_agent_event(
+            "Classification Agent",
+            "error",
+            f"Non-CV detected: {doc_type or 'unknown'}"
+        )
+    
         return {
             "file_name": uploaded_file.name,
             "status": "Exception",
             "doc_type": doc_type or "unknown",
             "ocr_used": extracted["ocr_used"],
-            "exception_reason": f"Document is not a CV/resume. Detected type: {doc_type or 'unknown'}",
-            "review_data": review_data,
-            "validation": {"passed": False, "issues": [f"Expected a CV/resume but detected {doc_type or 'unknown'}"], "warnings": []},
-            "confidence": {},
-            "duplicate_info": {
-                "is_duplicate": False,
-                "match_file": None,
-                "reason": None,
-                "score": 0.0,
-            },
-            "auto_result": {
-                "doc_type": doc_type or "unknown",
-                "structured_data": normalized.get("structured_data"),
-                "result": result,
-                "metrics": {},
-                "step_metrics": normalized.get("step_metrics", []),
-                "ocr_used": extracted["ocr_used"],
-                "extraction_mode": extracted["extraction_mode"],
-            },
-            "vectorstore": vectorstore,
-            "full_text": full_text,
+            "exception_reason": f"Not a CV/Resume (detected: {doc_type or 'unknown'})",
+    
+            # ⚠️ IMPORTANT: DO NOT PASS ANY RESULT DATA
+            "review_data": None,
+            "validation": None,
+            "confidence": None,
+            "duplicate_info": None,
+            "auto_result": None,
+            "vectorstore": None,
+            "full_text": None,
+    
             "cost": 0.0,
             "tokens": 0,
         }
-
+    
     record_agent_event("Validation Agent", "running", "Checking required fields")
     validation = normalized.get("validation") or validate_document_data(review_data, doc_type)
     confidence = normalized.get("confidence") or build_confidence_map(review_data, doc_type)
