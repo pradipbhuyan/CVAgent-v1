@@ -1,163 +1,175 @@
-import requests
-from pathlib import Path
-from graph_auth import get_graph_headers
+import base64
+import os
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-ALLOWED_CV_TYPES = {".pdf", ".docx", ".txt"}
+import requests
 
-class RemoteUploadedFile:
-    def __init__(self, name: str, content: bytes):
-        self.name = name
-        self._content = content
-        self._pos = 0
+GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+ALLOWED_CV_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
-    def getvalue(self):
-        return self._content
 
-    def read(self):
-        return self._content
+class SharePointConnectorError(Exception):
+    pass
 
-    def seek(self, pos):
-        self._pos = pos
 
-def resolve_sharepoint_site_id(site_url: str) -> str:
-    headers = get_graph_headers()
+def _get_access_token() -> str:
+    tenant_id = os.getenv("MS_TENANT_ID")
+    client_id = os.getenv("MS_CLIENT_ID")
+    client_secret = os.getenv("MS_CLIENT_SECRET")
 
+    if not tenant_id or not client_id or not client_secret:
+        raise SharePointConnectorError(
+            "Missing Microsoft Graph credentials. "
+            "Set MS_TENANT_ID, MS_CLIENT_ID, and MS_CLIENT_SECRET."
+        )
+
+    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    data = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": "https://graph.microsoft.com/.default",
+    }
+
+    resp = requests.post(token_url, data=data, timeout=30)
+    if not resp.ok:
+        raise SharePointConnectorError(
+            f"Token request failed [{resp.status_code}]: {resp.text}"
+        )
+
+    token = resp.json().get("access_token")
+    if not token:
+        raise SharePointConnectorError("Access token missing in token response.")
+
+    return token
+
+
+def _graph_get(path: str, token: str, params: Optional[dict] = None, raw: bool = False):
+    url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    resp = requests.get(url, headers=headers, params=params, timeout=60)
+    if not resp.ok:
+        raise SharePointConnectorError(
+            f"Graph GET failed [{resp.status_code}]: {resp.text}"
+        )
+
+    return resp.content if raw else resp.json()
+
+
+def _parse_sharepoint_site_url(site_url: str) -> Tuple[str, str]:
     parsed = urlparse(site_url)
     hostname = parsed.netloc
-    site_path = parsed.path.strip("/")
+    site_path = parsed.path.rstrip("/")
 
     if not hostname or not site_path:
-        raise ValueError("Invalid SharePoint site URL")
+        raise SharePointConnectorError(f"Invalid SharePoint site URL: {site_url}")
 
-    url = f"https://graph.microsoft.com/v1.0/sites/{hostname}:/{site_path}"
-    response = requests.get(url, headers=headers, timeout=60)
-    response.raise_for_status()
-
-    data = response.json()
-    site_id = data.get("id")
-    if not site_id:
-        raise ValueError("Unable to resolve SharePoint site ID")
-
-    return site_id
+    return hostname, site_path
 
 
-def list_site_drives(site_id: str):
-    headers = get_graph_headers()
-    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
-    response = requests.get(url, headers=headers, timeout=60)
-    response.raise_for_status()
-    return response.json().get("value", [])
+def _get_site_by_url(site_url: str, token: str) -> dict:
+    hostname, site_path = _parse_sharepoint_site_url(site_url)
+    return _graph_get(f"/sites/{hostname}:{site_path}", token)
 
 
-def resolve_drive_id_from_name(site_id: str, library_name: str = "Documents") -> str:
-    drives = list_site_drives(site_id)
+def _list_site_drives(site_id: str, token: str) -> List[dict]:
+    data = _graph_get(f"/sites/{site_id}/drives", token)
+    return data.get("value", [])
+
+
+def _find_drive_by_name(drives: List[dict], library_name: str) -> dict:
     for drive in drives:
-        if str(drive.get("name", "")).strip().lower() == library_name.strip().lower():
-            return drive["id"]
+        if (drive.get("name") or "").strip().lower() == library_name.strip().lower():
+            return drive
 
-    if drives:
-        # fallback to first available drive
-        return drives[0]["id"]
+    available = [d.get("name", "?") for d in drives]
+    raise SharePointConnectorError(
+        f"Library '{library_name}' not found. Available libraries: {available}"
+    )
 
-    raise ValueError("No document library / drive found for this SharePoint site")
 
-
-def list_drive_items(site_id: str, drive_id: str, folder_path: str):
-    headers = get_graph_headers()
+def _list_folder_children_by_path(drive_id: str, folder_path: str, token: str) -> List[dict]:
     folder_path = folder_path.strip("/")
 
-    if folder_path:
-        url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root:/{folder_path}:/children"
+    if not folder_path:
+        endpoint = f"/drives/{drive_id}/root/children"
     else:
-        url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root/children"
+        endpoint = f"/drives/{drive_id}/root:/{folder_path}:/children"
 
-    response = requests.get(url, headers=headers, timeout=60)
-    response.raise_for_status()
-
-    return response.json().get("value", [])
+    data = _graph_get(endpoint, token)
+    return data.get("value", [])
 
 
-def list_onedrive_items(drive_id: str, folder_path: str):
-    headers = get_graph_headers()
-    folder_path = folder_path.strip("/")
-
-    if folder_path:
-        url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{folder_path}:/children"
-    else:
-        url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/children"
-
-    response = requests.get(url, headers=headers, timeout=60)
-    response.raise_for_status()
-
-    return response.json().get("value", [])
+def _download_drive_item(drive_id: str, item_id: str, token: str) -> bytes:
+    return _graph_get(f"/drives/{drive_id}/items/{item_id}/content", token, raw=True)
 
 
-def filter_cv_files(items):
-    files = []
-    for item in items:
-        if "file" not in item:
+def _is_cv_filename(name: str) -> bool:
+    lower = name.lower()
+    if lower.startswith("~$"):
+        return False
+    return any(lower.endswith(ext) for ext in ALLOWED_CV_EXTENSIONS)
+
+
+def _collect_cv_files_from_children(drive_id: str, children: List[dict], token: str) -> List[Dict[str, bytes]]:
+    results = []
+
+    for item in children:
+        name = item.get("name", "")
+        item_id = item.get("id")
+
+        if "file" not in item or not item_id or not _is_cv_filename(name):
             continue
 
-        name = item.get("name", "")
-        suffix = Path(name).suffix.lower()
-        if suffix in ALLOWED_CV_TYPES:
-            files.append(item)
+        content = _download_drive_item(drive_id, item_id, token)
+        results.append({
+            "name": name,
+            "content": content,
+        })
 
-    return files
-
-
-def download_sharepoint_file(site_id: str, drive_id: str, item_id: str):
-    headers = get_graph_headers()
-    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/items/{item_id}/content"
-    response = requests.get(url, headers=headers, timeout=120)
-    response.raise_for_status()
-    return response.content
+    return results
 
 
-def download_onedrive_file(drive_id: str, item_id: str):
-    headers = get_graph_headers()
-    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/content"
-    response = requests.get(url, headers=headers, timeout=120)
-    response.raise_for_status()
-    return response.content
+def _encode_share_url(shared_url: str) -> str:
+    encoded = base64.urlsafe_b64encode(shared_url.encode("utf-8")).decode("utf-8")
+    encoded = encoded.rstrip("=")
+    return f"u!{encoded}"
 
 
 def get_cv_files_from_sharepoint(site_url: str, folder_path: str, library_name: str = "Documents"):
-    site_id = resolve_sharepoint_site_id(site_url)
-    drive_id = resolve_drive_id_from_name(site_id, library_name)
-
-    items = list_drive_items(site_id, drive_id, folder_path)
-    files = filter_cv_files(items)
-
-    results = []
-    for item in files:
-        content = download_sharepoint_file(site_id, drive_id, item["id"])
-        results.append({
-            "name": item["name"],
-            "content": content,
-            "id": item["id"],
-            "web_url": item.get("webUrl"),
-            "site_id": site_id,
-            "drive_id": drive_id,
-        })
-
-    return results
+    token = _get_access_token()
+    site = _get_site_by_url(site_url, token)
+    site_id = site["id"]
+    drives = _list_site_drives(site_id, token)
+    drive = _find_drive_by_name(drives, library_name)
+    drive_id = drive["id"]
+    children = _list_folder_children_by_path(drive_id, folder_path, token)
+    return _collect_cv_files_from_children(drive_id, children, token)
 
 
 def get_cv_files_from_onedrive(drive_id: str, folder_path: str):
-    items = list_onedrive_items(drive_id, folder_path)
-    files = filter_cv_files(items)
+    token = _get_access_token()
+    children = _list_folder_children_by_path(drive_id, folder_path, token)
+    return _collect_cv_files_from_children(drive_id, children, token)
 
-    results = []
-    for item in files:
-        content = download_onedrive_file(drive_id, item["id"])
-        results.append({
-            "name": item["name"],
-            "content": content,
-            "id": item["id"],
-            "web_url": item.get("webUrl"),
-            "drive_id": drive_id,
-        })
 
-    return results
+def get_cv_files_from_onedrive_url(shared_url: str):
+    token = _get_access_token()
+    share_token = _encode_share_url(shared_url)
+
+    item = _graph_get(f"/shares/{share_token}/driveItem", token)
+    drive_id = item.get("parentReference", {}).get("driveId")
+    item_id = item.get("id")
+
+    if not drive_id or not item_id:
+        raise SharePointConnectorError("Could not resolve shared OneDrive folder URL.")
+
+    children_data = _graph_get(f"/drives/{drive_id}/items/{item_id}/children", token)
+    children = children_data.get("value", [])
+    return _collect_cv_files_from_children(drive_id, children, token)
+
+
+def get_cv_files_from_sharepoint_url(folder_url: str):
+    return get_cv_files_from_onedrive_url(folder_url)
